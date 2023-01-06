@@ -20,11 +20,11 @@ end
 
 --- TITLE HOOKS ---
 
-function _init()
+function title_init()
 	blink=anim({9,4,4,7,4,7},2)
 end
 
-function _update()
+function title_update()
 	if (btnp(🅾️)) then
 		sfx(2) -- click sound
 		switch_scene("game")
@@ -32,31 +32,50 @@ function _update()
 	blink:update()
 end
 
-function _draw()
+function title_draw()
 	cls()
 	local str_start="press 🅾️ to start"
 	print(str_start,hcenter(str_start),vcenter(),blink:current())
 end
 
---- GAME HOOKS ---
+-- GAME_OVER HOOKS ---
+
+function gameover_init()
+	blink=anim({9,4,4,7,4,7},2)
+end
+
+function gameover_update()
+	if (btnp(❎)) then
+		sfx(2) -- click sound
+		switch_scene("title")
+	end
+	blink:update()
+end
+
+function gameover_draw()
+	cls()
+	local str_gameover="game over"
+	local str_start="press ❎ to continue"
+	print(str_gameover,hcenter(str_gameover),vcenter(),9)
+	print(str_start,hcenter(str_start),vcenter()+12,blink:current())
+end
+
+--- IN GAME HOOKS ---
 
 function game_init()
 	score=0
+	difficulty=1
 	entities={}
+	enemies={}
+	shots={}
+	
 	starfield=create_starfield(12)
 
-	ship=create_ship(28,46)	
-	create_enemy_wave(
-		{
-			{x=128,y=10},
-			{x=148,y=40},
-			{x=148,y=70},
-			{x=128,y=100}
-		}
-	)
+	ship=create_ship(28,46)
 end
 
 function game_update()
+	if (should_create_wave()) create_enemy_wave()
 	for e in all(entities) do
 		e:update()
 	end
@@ -67,7 +86,11 @@ function game_draw()
 	for e in all(entities) do
 		e:draw()
 	end
+	-- draw score
 	print("score:"..score,1,1,7)
+	-- draw energy bar
+	rectfill(2,120,ship.energy,126,11)
+	rect(1,120,31,126,7)
 end
 
 ------------------
@@ -76,7 +99,7 @@ end
 
 -- create muzzle effect of size, step s and color c
 function create_muzzle(x,y,size,s,c)
-	return {
+	local muzzle={
 		t=0,
 		size=size,
 		pos={x=x,y=y},
@@ -90,6 +113,7 @@ function create_muzzle(x,y,size,s,c)
 			circ(this.pos.x,this.pos.y,this.size,c or 9)
 		end
 	}
+	add(entitites,muzzle)
 end
 
 -- create an explosion
@@ -136,6 +160,7 @@ function create_explosion(x,y)
 				}
 			)
 		end
+		sfx(3)
 		add(entities,explosion)
 end
 
@@ -149,6 +174,7 @@ function create_ship(x,y)
 		pos={x=24,y=64},
 		spd={x=0,y=0},
 		box={x=0,y=1,w=8,h=6},
+		energy=30,
 		flame=create_flame(24,64),
 		state="base",
 		anim={
@@ -157,6 +183,19 @@ function create_ship(x,y)
 			dwn=anim({2},1)
 		},
 		update=function(this)
+			for e in all(enemies) do 
+				if (spr_collide(this,e)) then
+					e:destroy() -- we're jumping into game_over, so we don't actually need this
+					this:destroy()
+				end
+			end
+			for s in all(shots) do
+				if (spr_collide(this,s)) then
+					s.remove(s)
+					this.energy-=3
+					if (this.energy<=0) this:destroy()
+				end
+			end
 			this.flame:update()
 			if btnp(⬆️) then
 				this.spd.y-=0.5
@@ -175,7 +214,7 @@ function create_ship(x,y)
 				this.spd.y-=ship.spd.y/40
 			end
 			if btnp(🅾️) then
-				add(entities,create_shot(ship.pos.x,ship.pos.y))
+				create_shot(ship.pos.x+9,ship.pos.y+2)
 			end
 			if (abs(this.spd.y)<0.2) this.state="base"
 			this.pos.x+=this.spd.x
@@ -185,6 +224,10 @@ function create_ship(x,y)
 		draw=function(this)
 			this.flame:draw(this.pos.x,this.pos.y)
 			spr(this.anim[this.state]:current(),this.pos.x,this.pos.y)
+		end,
+		destroy=function()
+			sfx(4)
+			switch_scene("gameover")
 		end
 	}
 	add(entities,ship)
@@ -206,19 +249,26 @@ end
 
 -- create player's shoot
 function create_shot(x,y)
-	add(entities,create_muzzle(ship.pos.x+8,ship.pos.y+4,10,4))
 	sfx(0)
-	return {
+	local shot={
 		pos={x=x,y=y},
 		spd={x=5,y=0},
+		box={x=2,y=5,w=4,h=1},
 		update=function(this)
 			this.pos.x+=this.spd.x
 			if (this.pos.x>127) del(entities,this)
 		end,
 		draw=function(this)
 			spr(7,this.pos.x,this.pos.y)
+		end,
+		remove=function(this)
+			del(shots,this)
+			del(entitites,this)
 		end
 	}
+	create_muzzle(x,y,10,4)
+	add(entities,shot)
+	add(shots,shot)
 end
 
 ---------------
@@ -227,32 +277,65 @@ end
 
 -- creates an enemy wave
 -- positions for enemies can be given
-function create_enemy_wave(n)
-	for e in all(n) do
-		add(entities,create_enemy(e.x,e.y))
+function create_enemy_wave(t)
+	local wave_types={
+		{
+			{x=128,y=10},
+			{x=148,y=40},
+			{x=148,y=70},
+			{x=128,y=100}
+		},
+		{
+			{x=128,y=20},
+			{x=128,y=100}
+		},
+		{
+			{x=128,y=40},
+			{x=148,y=70},
+			{x=128,y=100}
+		}
+	}
+	local wt=t or flr(rnd(3)+1)
+	for e in all(wave_types[wt]) do
+		create_enemy(e.x,e.y)
 	end
 end
 
 -- creates single enemy
 function create_enemy(x,y)
-	return {
+	local enemy={
 		pos={x=x,y=y},
 		spd={x=-1,y=0},
 		box={x=1,y=1,w=6,h=6},
 		flame=create_enemy_flame(x,y),
 		update=function(this)
-			if (this.pos.x+this.box.w+this.box.x<0) del(entities,this)
+			if (abs_box(this).x1<0) this:remove()
+			for s in all(shots) do
+				if (spr_collide(this,s)) then
+					this:destroy()
+				end
+			end
 			this.spd.y=sin(this.pos.x>>5)
 			this.pos.x+=this.spd.x
 			this.pos.y+=this.spd.y
 			this.flame:update()
-			if (rnd(15)>14) create_enemy_shot(this.pos.x,this.pos.y)
+			if (enemy_should_fire()) create_enemy_shot(this.pos.x-8,this.pos.y)
 		end,
 		draw=function(this)
 			this.flame:draw(this.pos.x,this.pos.y)
 			spr(16,this.pos.x,this.pos.y)
+		end,
+		destroy=function(this)
+			create_explosion(this.pos.x, this.pos.y)
+			this:remove()
+		end,
+		remove=function(this)
+			del(entities, this)
+			del(enemies, this)
 		end
 	}
+	add(enemies,enemy)
+	add(entities,enemy)
 end
 
 -- create enemy ship's flame
@@ -270,11 +353,11 @@ end
 
 -- create enemy shot
 function create_enemy_shot(x,y)
-		add(entities,create_muzzle(x-1,y+3,6,3,11))
 		sfx(1)
 		local shot={
 			pos={x=x,y=y},
 			spd={x=-5,y=0},
+			box={x=3,y=4,w=4,h=2},
 			anim=anim({20,21},1),
 			update=function(this)
 				this.anim:update()
@@ -283,14 +366,48 @@ function create_enemy_shot(x,y)
 			end,
 			draw=function(this)
 				spr(this.anim:current(),this.pos.x,this.pos.y)
+			end,
+			remove=function(this)
+				del(entities, this)
+				del(shots, this)
 			end
 		}
+		create_muzzle(x-1,y+3,6,3,11)
 		add(entities,shot)
+		add(shots,shot)
 end
 
+function should_create_wave()
+	return (rnd(100)<=difficulty)
+end
+
+function enemy_should_fire()
+	return (rnd(100)<=difficulty)
+end
 ---------------
 --- HELPERS ---
 ---------------
+
+function abs_box(a)
+	return {
+		x1=a.pos.x+a.box.x,
+		y1=a.pos.y+a.box.y,
+		x2=a.pos.x+a.box.x+a.box.w,
+		y2=a.pos.y+a.box.y+a.box.h
+	}
+end
+
+-- collision detection
+function spr_collide(a,b)
+	local box_a=abs_box(a)
+	local box_b=abs_box(b)
+	return not(
+		box_a.x1 > box_b.x2 or
+		box_a.y1 > box_b.y2 or
+		box_b.x1 > box_a.x2 or
+		box_b.y1 > box_a.y2
+	)
+end
 
 -- switch scene
 function switch_scene(name)
@@ -398,11 +515,12 @@ __gfx__
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000bb300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00b73600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0b3366000000000070000000a00000000007730000a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0b66dd0097a00000aa970000a000000000a00000000bb30000000000000000000000000000000000000000000000000000000000000000000000000000000000
-006555d08a000000a800000090000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0b3366000000000070000000a0000000000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0b66dd0097a00000aa970000a000000000bbbc7000bbb7c000000000000000000000000000000000000000000000000000000000000000000000000000000000
+006555d08a000000a800000090000000000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
 000200000f750107501175014750157501a7501d7501f75024750297502f750007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700
 000200001255011550105501055014550185501e55024550265502555021550007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700007000070000700
 000100001651016520165401655017550195601a5601d5601e5602056022560245502654026540265300d5002650026550265500d50025500255000d5000d5000d5000d5000d5000d500045000d5000d5000d500
+000400000d6300e660126601a660186000b6500565002630026200261001640016300061002650026500765006640056200561000600006000060007600076000660005600036000260002600016000160001600
