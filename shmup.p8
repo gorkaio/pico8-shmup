@@ -246,7 +246,7 @@ function create_flame(x,y)
 	}
 end
 
--- create player's shoot
+-- create player's shot
 function create_shot(x,y)
 	sfx(0)
 	local shot={
@@ -325,6 +325,7 @@ function create_enemy(x,y)
 			spr(16,this.pos.x,this.pos.y)
 		end,
 		destroy=function(this)
+			score+=10
 			create_explosion(this.pos.x, this.pos.y)
 			this:remove()
 		end,
